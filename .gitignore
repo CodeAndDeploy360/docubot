@@ -1,0 +1,48 @@
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Tests / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Local data & DB
+vector_db/
+*.sqlite3
+*.db
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Cursor (local AI rules — optional to share)
+.cursor/
+
+# Logs
+*.log
