@@ -1,0 +1,9 @@
+This file contains synthetic PII for testing redaction.
+
+Primary contact: jane.doe@example.com
+Backup email: <sales_team@widgets.example.org>
+
+Phone: (415) 555-0199 or +1-800-555-0100
+Social (fake): 123-45-6789
+
+Please do not use these values for anything real.
