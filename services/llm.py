@@ -13,7 +13,7 @@ from typing import Any, TypeVar
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage
 
-from config import chat_model, llm_provider, llm_timeout_sec, ollama_base_url
+from config import chat_model, gemini_api_key, llm_provider, llm_timeout_sec, ollama_base_url
 
 T = TypeVar("T")
 
@@ -63,7 +63,7 @@ def invoke_with_rate_limit_retry(fn: Callable[[], T]) -> T:
 
 
 def _gemini_api_key() -> str:
-    key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    key = gemini_api_key()
     if not key:
         raise RuntimeError(
             "GEMINI_API_KEY or GOOGLE_API_KEY is required when DOCUBOT_LLM_PROVIDER=gemini."
@@ -150,23 +150,6 @@ def build_chat_model(*, temperature: float = 0.2, streaming: bool = False) -> Ba
         if key not in _llm_cache:
             _llm_cache[key] = _build_chat_model_impl(temperature=temperature, streaming=streaming)
         return _llm_cache[key]
-
-
-def invoke_messages(messages: list[BaseMessage], **kwargs: Any) -> tuple[str, dict[str, Any]]:
-    llm = build_chat_model(streaming=False)
-    t0 = time.perf_counter()
-
-    def _call() -> AIMessage:
-        return llm.invoke(messages, **kwargs)
-
-    res = invoke_with_rate_limit_retry(_call)
-    dt = time.perf_counter() - t0
-    text = _flatten_message_content(res.content)
-    usage = {}
-    if getattr(res, "usage_metadata", None):
-        usage = dict(res.usage_metadata)
-    usage["latency_sec"] = round(dt, 4)
-    return text, usage
 
 
 def stream_messages(messages: list[BaseMessage], **kwargs: Any) -> Iterator[tuple[str, dict[str, Any] | None]]:

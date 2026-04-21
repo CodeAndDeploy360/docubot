@@ -106,8 +106,3 @@ def parse_upload(filename: str, data: bytes) -> ParsedDocument:
     if name.endswith(".pdf"):
         return parse_pdf_bytes(data)
     raise ValueError(f"Unsupported file type: {filename}")
-
-
-def parse_streamlit_uploaded_file(file) -> ParsedDocument:
-    """Accept a Streamlit UploadedFile-like object with `.name` and `.getvalue()`."""
-    return parse_upload(file.name, file.getvalue())

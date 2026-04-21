@@ -363,16 +363,3 @@ def build_workflow() -> StateGraph:
 
 def compile_app_graph():
     return build_workflow().compile()
-
-
-def run_sync(user_query: str, chat_history: list[tuple[str, str]] | None = None) -> AgentState:
-    graph = compile_app_graph()
-    initial: AgentState = {
-        "user_query": user_query,
-        "chat_history": chat_history or [],
-        "replan_count": 0,
-        "replan_note": "",
-        "trace": [],
-        "workflow_started_at": time.perf_counter(),
-    }
-    return graph.invoke(initial)  # type: ignore[return-value]

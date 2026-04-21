@@ -22,7 +22,7 @@ def pii_redaction_enabled() -> bool:
 
 
 def chat_model() -> str:
-    # Default chat model follows DOCUBOT_LLM_PROVIDER (Gemini per PM).
+    # Default chat model follows DOCUBOT_LLM_PROVIDER (Gemini).
     # gemini-1.5-flash is often 404 on current Gemini Developer API (v1beta); use a 2.5/2.0 id.
     # Default avoids gemini-2.5-flash-lite as primary: free tier often caps it very low (e.g. 20
     # generateContent calls/day per project). gemini-2.5-flash usually has a separate quota pool.
@@ -46,6 +46,15 @@ def llm_provider() -> str:
     return os.getenv("DOCUBOT_LLM_PROVIDER", "gemini").lower()
 
 
+def gemini_api_key() -> str | None:
+    """Non-empty Gemini / Google API key from env (after ``load_dotenv`` / Streamlit secrets)."""
+    raw = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+    if raw is None:
+        return None
+    key = raw.strip()
+    return key or None
+
+
 def ollama_base_url() -> str | None:
     return os.getenv("DOCUBOT_OLLAMA_BASE_URL")
 
@@ -63,28 +72,6 @@ def graph_invoke_timeout_sec() -> float:
 
 def web_search_timeout_sec() -> float:
     return float(os.getenv("DOCUBOT_WEB_SEARCH_TIMEOUT_SEC", "25"))
-
-
-def agent_mode() -> str:
-    """
-    ``full`` — LangGraph planner → retriever → grader → generator (several LLM calls per question).
-    ``fast`` — one hybrid retrieval + one LLM call.
-
-    Default: ``fast`` when chat is **Gemini** and ``DOCUBOT_AGENT_MODE`` is unset — free tier
-    limits ``generate_content`` (often ~20/day per model); full mode can use 3+ calls per turn.
-    Set ``DOCUBOT_AGENT_MODE=full`` explicitly for the full graph when you have quota or billing.
-    """
-    raw = os.getenv("DOCUBOT_AGENT_MODE")
-    if raw is not None and raw.strip():
-        return raw.strip().lower()
-    if llm_provider() == "gemini":
-        return "fast"
-    return "full"
-
-
-def fast_graph_timeout_sec() -> float:
-    """Timeout for the fast pipeline (retrieve + one generation)."""
-    return float(os.getenv("DOCUBOT_FAST_TIMEOUT_SEC", "180"))
 
 
 def max_sources_display() -> int:

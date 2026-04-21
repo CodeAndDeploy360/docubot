@@ -168,20 +168,3 @@ def clean_text(raw: str | bytes, *, dedupe_exact_chunks: bool = True) -> Cleanin
     report.quality_notes = notes
     report.final_text = text
     return report
-
-
-def clean_chunk_for_index(text: str, chunk_index: int) -> tuple[str, CleaningReport]:
-    """Clean an individual chunk; dedup across chunks is handled in the ingest service."""
-    report = CleaningReport()
-    text, tlog = _text_cleanup(text)
-    report.stages.append(tlog)
-    text, plog = _pii_redact(text, pii_redaction_enabled())
-    report.stages.append(plog)
-    score, notes = _quality_score(text)
-    report.stages.append(
-        StageLog("quality_check", {"score": score, "notes": notes, "chunk_index": chunk_index})
-    )
-    report.quality_score = score
-    report.quality_notes = notes
-    report.final_text = text
-    return text, report

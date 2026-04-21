@@ -75,7 +75,7 @@ def test_list_documents_and_legacy_from_index():
     assert docs[0]["chunk_count"] == 1
 
 
-def test_list_documents_from_index_groups_chunks():
+def test_list_documents_and_legacy_groups_chunks():
     doc_id = store.new_doc_id()
     chunks = ["a", "b", "c"]
     metas = [
@@ -85,7 +85,7 @@ def test_list_documents_from_index_groups_chunks():
     with patch("rag.retriever.embed_texts", side_effect=_fake_embed):
         embs = _fake_embed(chunks)
         store.add_document_chunks(doc_id, "sample.pdf", chunks, embs, metas)
-    docs = store.list_documents_from_index()
+    docs, _legacy = store.list_documents_and_legacy_from_index()
     assert len(docs) == 1
     assert docs[0]["doc_id"] == doc_id
     assert docs[0]["name"] == "sample.pdf"

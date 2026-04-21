@@ -87,15 +87,6 @@ def test_report_to_dict(monkeypatch):
     assert d["char_count"] == 3
 
 
-def test_clean_chunk_for_index(monkeypatch):
-    _reload_cleaner(monkeypatch, pii="true")
-    import pipeline.cleaner as cl
-
-    text, rep = cl.clean_chunk_for_index("foo@bar.com", 0)
-    assert "[EMAIL_REDACTED]" in text
-    assert rep.quality_score >= 0
-
-
 def test_pii_test_txt_fixture_redacts(monkeypatch):
     """Spec demo file ``test_data/pii_test.txt``: emails, phones, SSN-style values masked."""
     _reload_cleaner(monkeypatch, pii="true")

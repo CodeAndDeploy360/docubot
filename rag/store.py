@@ -120,20 +120,6 @@ def list_documents_and_legacy_from_index() -> tuple[list[dict[str, Any]], int]:
     return docs, legacy
 
 
-def list_documents_from_index() -> list[dict[str, Any]]:
-    """
-    Rebuild the sidebar document list from Chroma metadata so it survives browser refresh.
-
-    Each indexed upload is stored with ``doc_id`` and ``source`` (filename) on every chunk.
-    """
-    return list_documents_and_legacy_from_index()[0]
-
-
-def count_legacy_chunks_without_doc_id() -> int:
-    """Chunks missing ``doc_id`` (old indexes). Prefer session-cached value in the UI; this scans Chroma."""
-    return list_documents_and_legacy_from_index()[1]
-
-
 def clear_index() -> int:
     """Remove all chunks from storage. Returns how many rows were removed (0 if none)."""
     client = get_client()
@@ -149,8 +135,3 @@ def clear_index() -> int:
         return n
     _bump_index_revision()
     return n
-
-
-def fetch_all_chunks() -> dict[str, Any]:
-    col = get_collection()
-    return col.get(include=["documents", "metadatas", "embeddings"])
