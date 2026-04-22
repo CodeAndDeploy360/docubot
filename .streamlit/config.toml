@@ -1,0 +1,8 @@
+# Streamlit file watcher walks imported packages. Hugging Face `transformers` (pulled in
+# transitively by some ML-related deps) lazy-imports vision modules that need `torchvision`,
+# which we do not install — that produces harmless ModuleNotFoundError tracebacks in the console.
+#
+# "none" = quiet console; you can still refresh the browser to reload. For reload-on-save,
+# set to "auto" and ignore any torchvision-related watcher noise.
+[server]
+fileWatcherType = "none"
