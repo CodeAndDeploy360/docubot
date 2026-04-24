@@ -18,10 +18,28 @@ import streamlit as st
 import config
 from agent.graph import compile_app_graph
 from agent.state import AgentState
+from auth.service import (
+    get_password_reset_link_for_email,
+    init_auth,
+    login_user,
+    register_user,
+    request_password_reset,
+    resend_verification_email,
+    reset_password_with_token,
+    verify_email_with_token,
+)
 from pipeline.ingestor import parse_upload
 from rag import store
 from rag.ingest import index_parsed_document
 from services.llm import stream_messages
+from streamlit_session import (
+    LOGOUT_FLAG,
+    clear_all_session_persistence,
+    persist_session_after_login,
+    try_restore_user_session,
+)
+
+init_auth()
 
 try:
     import markdown as md_lib
@@ -29,6 +47,9 @@ except ImportError:  # pragma: no cover
     md_lib = None
 
 st.set_page_config(page_title="DocuBot", layout="wide", initial_sidebar_state="expanded")
+
+# Restore login after full page refresh: ?docubot_sid=… (DB) and optional cookie. Must run before auth gate.
+try_restore_user_session()
 
 CUSTOM_CSS = """
 <style>
@@ -257,6 +278,151 @@ CUSTOM_CSS = """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
 
 
+def _clear_data_session_keys() -> None:
+    for k in (
+        "docs",
+        "messages",
+        "uploader_key",
+        "last_trace",
+        "last_workflow_ms",
+        "last_gen_usage",
+        "legacy_chunk_count",
+    ):
+        st.session_state.pop(k, None)
+
+
+def _qp_get_single(name: str) -> str:
+    v = st.query_params.get(name, "")
+    if v is None:
+        return ""
+    if isinstance(v, (list, tuple)) and v:
+        return str(v[0])
+    return str(v)
+
+
+def _query_params_drain_verify() -> None:
+    if "verify" not in st.query_params:
+        return
+    token = _qp_get_single("verify")
+    err = verify_email_with_token(token)
+    st.session_state["_auth_flash"] = ("e" if err else "k", err or "Your email is verified. You can sign in below.")
+    try:
+        st.query_params.pop("verify", None)  # type: ignore[call-overload]
+    except (TypeError, KeyError, AttributeError):
+        pass
+    st.rerun()
+
+
+def _show_auth_flash() -> None:
+    fl = st.session_state.pop("_auth_flash", None)
+    if not fl:
+        return
+    kind, text = fl
+    if not text:
+        return
+    if kind == "k":
+        st.success(text)
+    else:
+        st.error(text)
+
+
+def _render_auth_wall() -> None:
+    _query_params_drain_verify()
+    _show_auth_flash()
+
+    st.markdown(
+        "<div class='docubot-app-header' role='banner' style='position:static;'>"
+        "<p class='docubot-header-title'>DocuBot</p>"
+        "<p class='docubot-header-subtitle'>Sign in to continue</p></div>",
+        unsafe_allow_html=True,
+    )
+
+    reset_tok = _qp_get_single("reset")
+    if reset_tok:
+        st.subheader("Set a new password")
+        with st.form("docubot_reset_pwd"):
+            p1 = st.text_input("New password", type="password", key="rs_p1", autocomplete="new-password")
+            p2 = st.text_input("Confirm new password", type="password", key="rs_p2", autocomplete="new-password")
+            if st.form_submit_button("Update password", type="primary", use_container_width=True):
+                err = reset_password_with_token(reset_tok, p1, p2)
+                if err:
+                    st.error(err)
+                else:
+                    st.session_state["_auth_flash"] = (
+                        "k",
+                        "Password updated. You can sign in with your new password.",
+                    )
+                    try:
+                        st.query_params.pop("reset", None)  # type: ignore[call-overload]
+                    except (TypeError, KeyError, AttributeError):
+                        pass
+                    st.rerun()
+        st.caption("Link expires after two hours. Request a new one from the sign-in page if it no longer works.")
+        return
+
+    t1, t2 = st.tabs(["Sign in", "Create account"])
+    with t1:
+        with st.form("docubot_login"):
+            u = st.text_input("Email", key="l_email", autocomplete="email")
+            p = st.text_input("Password", type="password", key="l_pw", autocomplete="current-password")
+            if st.form_submit_button("Sign in", type="primary", use_container_width=True):
+                uid, uemail, err = login_user(u, p)
+                if err:
+                    st.error(err)
+                else:
+                    st.session_state.user_id = uid
+                    st.session_state.user_email = uemail
+                    _clear_data_session_keys()
+                    persist_session_after_login(uid, uemail)
+                    st.rerun()
+        with st.expander("Forgot password", expanded=False):
+            with st.form("docubot_forgot"):
+                fe = st.text_input("Email for reset", key="f_email", autocomplete="email")
+                if st.form_submit_button("Send reset link", use_container_width=True):
+                    re = request_password_reset(fe)
+                    if re:
+                        st.error(re)
+                    else:
+                        st.info("If that address is registered, you will receive a short-lived reset link by email.")
+                        if not config.smtp_config():
+                            link = get_password_reset_link_for_email(fe)
+                            if link:
+                                st.info(
+                                    "No SMTP configured — use this link once: "
+                                    f'[{link}]({link})'
+                                )
+        with st.expander("Resend verification email", expanded=False):
+            with st.form("docubot_resend"):
+                ve = st.text_input("Unverified account email", key="v_email", autocomplete="email")
+                if st.form_submit_button("Resend", use_container_width=True):
+                    a, b = resend_verification_email(ve)
+                    if a:
+                        if str(a).startswith("Could not"):
+                            st.error(a)
+                        else:
+                            st.info(a)
+                    if b:
+                        bstr = str(b)
+                        if "**" in bstr or "http" in bstr.lower():
+                            st.markdown(bstr)
+                        else:
+                            st.success(bstr)
+    with t2:
+        with st.form("docubot_register"):
+            u2 = st.text_input("Email", key="r_u", help="We use this for sign-in, verification, and password reset.")
+            p2 = st.text_input("Password", type="password", key="r_p1")
+            p3 = st.text_input("Confirm password", type="password", key="r_p2")
+            if st.form_submit_button("Create account", type="primary", use_container_width=True):
+                _, err, info = register_user(u2, p2, p3)
+                if err:
+                    st.error(err)
+                else:
+                    st.success("Account created.")
+                    if info:
+                        st.markdown(info)
+    st.caption("Each account has its own document index. Other users cannot see your files or Q&A history.")
+
+
 def _init_session() -> None:
     if "messages" not in st.session_state:
         st.session_state.messages = []
@@ -462,7 +628,7 @@ def _remove_doc(doc: dict[str, Any]) -> None:
     if doc.get("status") == "indexed" and (doc.get("chunk_count") or 0) > 0 and deleted == 0:
         st.warning(
             "Nothing was deleted in the vector store (0 chunks). If questions still cite this file, "
-            "chunks may lack `doc_id` metadata (legacy index). Clear `DOCUBOT_CHROMA_PATH` or re-upload."
+            "chunks may lack `doc_id` metadata (legacy index). Re-upload the file or clear the account index."
         )
     st.session_state.docs = [d for d in st.session_state.docs if d["doc_id"] != doc_id]
     # New file_uploader instance so it does not keep showing a deleted file as "selected".
@@ -474,6 +640,11 @@ def _reset_file_uploader() -> None:
     st.rerun()
 
 
+if not st.session_state.get("user_id"):
+    _render_auth_wall()
+    st.stop()
+
+store.set_active_user(str(st.session_state.user_id))
 _init_session()
 
 if config.llm_provider() == "gemini" and not config.gemini_api_key():
@@ -501,6 +672,18 @@ st.markdown(
 )
 
 with st.sidebar:
+    st.caption(
+        "Signed in as **{}**".format(st.session_state.get("user_email") or "—")
+    )
+    if st.button("Sign out", key="docubot_logout", use_container_width=True):
+        store.set_active_user(None)
+        st.session_state[LOGOUT_FLAG] = True
+        clear_all_session_persistence()
+        st.session_state.pop("user_id", None)
+        st.session_state.pop("user_email", None)
+        _clear_data_session_keys()
+        st.rerun()
+    st.divider()
     with st.container(border=True):
         st.markdown("### Upload documents")
         uploads = st.file_uploader(
@@ -525,8 +708,8 @@ with st.sidebar:
     legacy = int(st.session_state.get("legacy_chunk_count", 0))
     if legacy:
         st.warning(
-            f"**{legacy} chunk(s)** in the index have no document id (legacy data). "
-            "Per-file delete may not remove them — use **Remove all vectors** below or delete the `vector_db` folder."
+            f"**{legacy} piece(s)** of older indexed text have no document id (legacy data). "
+            "Removing a single file may not clear them — use **Remove all documents** below or contact support to fully reset your index."
         )
     if not st.session_state.docs:
         st.info("No documents yet.")
@@ -553,11 +736,15 @@ with st.sidebar:
         d.get("status") == "indexed" for d in st.session_state.docs
     )
     if _has_clearable_index:
-        if st.button("Remove all vectors", key="remove_all_vectors", help="Clear the entire Chroma index for this app"):
+        if st.button(
+            "Remove all documents",
+            key="remove_all_documents",
+            help="Removes every file from the list above and clears your search index for this account.",
+        ):
             store.clear_index()
             st.session_state.docs = []
             st.session_state.legacy_chunk_count = 0
-            st.success("All vectors removed.")
+            st.success("All documents have been removed from your index.")
             st.rerun()
 
     # After the list is drawn so PROCESSING rows are visible; then index one queued file per run.
@@ -595,6 +782,7 @@ if prompt := st.chat_input("Ask a question about your documents..."):
             t0 = time.perf_counter()
             graph = compile_app_graph()
             initial: AgentState = {
+                "user_id": str(st.session_state.user_id),
                 "user_query": prompt,
                 "chat_history": _chat_history_tuples(),
                 "replan_count": 0,

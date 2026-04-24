@@ -8,7 +8,7 @@ from typing import Any
 from rank_bm25 import BM25Okapi
 
 from rag.embedder import embed_texts
-from rag.store import get_collection, index_revision
+from rag.store import get_active_user, get_collection, index_revision
 
 
 def _tokenize(s: str) -> list[str]:
@@ -87,8 +87,19 @@ class HybridRetriever:
         return out
 
 
-_default_hybrid = HybridRetriever()
+_hybrids: dict[str, HybridRetriever] = {}
+
+
+def _get_hybrid() -> HybridRetriever:
+    uid = get_active_user()
+    if uid not in _hybrids:
+        _hybrids[uid] = HybridRetriever()
+    return _hybrids[uid]
 
 
 def hybrid_search(query: str, k: int = 8) -> list[RetrievedChunk]:
-    return _default_hybrid.search(query, k=k)
+    return _get_hybrid().search(query, k=k)
+
+
+def clear_hybrid_cache_for_tests() -> None:
+    _hybrids.clear()

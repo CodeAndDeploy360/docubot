@@ -1,9 +1,7 @@
 # DocuBot — see README "Deployment" → Docker
 # Build:  docker build -t docubot .
-# Run:    docker run --rm -p 8501:8501 --env-file .env -v docubot_chroma:/data/chroma docubot
-# Chroma: persist by mounting a volume at /data/chroma. The app uses DOCUBOT_CHROMA_PATH below;
-#         if your .env sets DOCUBOT_CHROMA_PATH=./vector_db, that overrides this — set /data/chroma
-#         in .env for Docker, or add -e DOCUBOT_CHROMA_PATH=/data/chroma after --env-file.
+# Run:    docker run --name docubot --rm -p 8501:8501 --env-file .env -e DOCUBOT_DATA_DIR=/data -v docubot_data:/data docubot
+# Persist user DB + all per-user Chroma indexes by mounting a volume at DOCUBOT_DATA_DIR (/data).
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -18,7 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 ENV PYTHONPATH=/app
-ENV DOCUBOT_CHROMA_PATH=/data/chroma
+ENV DOCUBOT_DATA_DIR=/data
 
 EXPOSE 8501
 

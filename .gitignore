@@ -29,7 +29,7 @@ htmlcov/
 .ruff_cache/
 
 # Local data & DB
-vector_db/
+.docubot/
 *.sqlite3
 *.db
 

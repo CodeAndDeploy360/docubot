@@ -9,6 +9,7 @@ from langchain_core.messages import BaseMessage
 
 
 class AgentState(TypedDict, total=False):
+    user_id: str
     user_query: str
     chat_history: list[tuple[str, str]]
     plan: list[dict[str, Any]]

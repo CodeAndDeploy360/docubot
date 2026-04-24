@@ -16,9 +16,11 @@ DocuBot is a training project: a single-page **Streamlit** app where you upload 
    pip install -r requirements.txt
    ```
 
-3. Copy `.env.example` to `.env` and set:
+3. Copy **`.env.example`** to **`.env`** and set at least:
    - **`GEMINI_API_KEY`** (or **`GOOGLE_API_KEY`**) — [Google AI Studio](https://aistudio.google.com/apikey)
-   - **`OPENAI_API_KEY`** — required for **embeddings** (`text-embedding-3-small`)
+   - **`OPENAI_API_KEY`** — **embeddings** and hybrid RAG (`text-embedding-3-small` by default)
+
+   All other keys in `.env.example` are optional; omit them or use the commented examples. Defaults for app behavior are defined in **`config.py`**.
 
 4. Run the app:
 
@@ -26,22 +28,28 @@ DocuBot is a training project: a single-page **Streamlit** app where you upload 
    PYTHONPATH=. streamlit run app.py
    ```
 
-5. Open the URL Streamlit prints (usually http://localhost:8501).
+5. Open the URL Streamlit prints (usually http://127.0.0.1:8501), then **Create account** or **Sign in**. Each user gets a private document index under **`DOCUBOT_DATA_DIR`** (default **`.docubot/`**).
 
 ## Configuration
+
+`app.py` calls **`load_dotenv()`** so variables can live in a **`.env`** file next to the project. The template **`.env.example`** lists supported keys. Optional settings default as implemented in **`config.py`** (see the functions that read each `DOCUBOT_*` name).
 
 | Variable | Purpose |
 |----------|---------|
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Gemini chat (default provider). |
 | `OPENAI_API_KEY` | **Embeddings** (and OpenAI chat if you switch provider). |
 | `DOCUBOT_LLM_PROVIDER` | `gemini` (default), `openai`, or `ollama`. |
-| `DOCUBOT_CHAT_MODEL` | e.g. `gemini-2.5-flash-lite`, `gemini-2.5-flash`, or `gemini-2.0-flash` (see [Gemini models](https://ai.google.dev/gemini-api/docs/models); `gemini-1.5-flash` often returns **404** on current Developer API). |
+| `DOCUBOT_CHAT_MODEL` | e.g. `gemini-2.5-flash` or `gemini-2.0-flash` (see [Gemini models](https://ai.google.dev/gemini-api/docs/models); older ids such as `gemini-1.5-flash` may return **404** on the current Developer API). |
 | `DOCUBOT_EMBEDDING_MODEL` | Default `text-embedding-3-small`. |
 | `DOCUBOT_EMBEDDING_PROVIDER` | `openai` (default). |
-| `DOCUBOT_WEB_SEARCH_BACKEND` | `duckduckgo` (default, live HTML search) or `tavily` (needs `TAVILY_API_KEY`). |
+| `OLLAMA_API_KEY` | Passed to the Ollama OpenAI-compatible client (often the literal `ollama`). |
+| `DOCUBOT_OLLAMA_BASE_URL` | When using Ollama for chat (e.g. `http://localhost:11434/v1`). |
+| `DOCUBOT_WEB_SEARCH_BACKEND` | `duckduckgo` (default) or `tavily` (requires `TAVILY_API_KEY`). |
 | `TAVILY_API_KEY` | Required when `DOCUBOT_WEB_SEARCH_BACKEND=tavily`. |
-| `DOCUBOT_OLLAMA_BASE_URL` | When using Ollama for chat. |
-| `DOCUBOT_CHROMA_PATH` | Chroma persistence directory (default `./vector_db`; Docker image uses `/data/chroma`). |
+| `DOCUBOT_DATA_DIR` | App data root: SQLite users DB (`users.sqlite3`) and per-user Chroma under `users/<id>/chroma` (default **`.docubot`** locally; Docker sets **`/data`**). |
+| `DOCUBOT_PUBLIC_URL` | Base URL (no trailing slash) for **verification** and **password-reset** links in emails. Must match the URL users open in production. Default `http://127.0.0.1:8501`. |
+| `DOCUBOT_SMTP_*` | Optional SMTP for transactional mail (`DOCUBOT_SMTP_HOST`, `DOCUBOT_SMTP_PORT`, `DOCUBOT_SMTP_USER`, `DOCUBOT_SMTP_PASSWORD`, `DOCUBOT_SMTP_FROM`, `DOCUBOT_SMTP_USE_TLS`). If unset, **verification and password-reset links are shown in the app** (no email sent). |
+| `DOCUBOT_SESSION_SECRET` | Optional HMAC key for signed “stay signed in” cookies; if unset, a key is derived from `DOCUBOT_DATA_DIR` (fine for single-machine dev). |
 | `DOCUBOT_PII_REDACTION_ENABLED` | `true` / `false` for regex PII masking during cleaning. |
 | `DOCUBOT_MAX_SOURCES_DISPLAY` | Max source lines under each answer (default **3**). |
 | `DOCUBOT_RETRIEVER_K` | Chunks retrieved per question for hybrid search (default **8**). |
@@ -66,27 +74,43 @@ DocuBot is a training project: a single-page **Streamlit** app where you upload 
 
 **Security:** never commit `.env` or paste real API keys into `.env.example`. If a key was ever committed, **rotate it** in the provider console.
 
+## Accounts, authentication, and data
+
+- **Sign in / Create account** in the app: **email + password** only. Passwords are stored as **bcrypt** hashes in **`DOCUBOT_DATA_DIR/users.sqlite3`**. To reset the account store during development, delete `users.sqlite3` and restart the app.
+- **Code layout:** `auth/service.py` (register, login, verification, password reset), `auth/db.py` (SQLite users + `user_sessions`), `auth/mail.py` (optional SMTP), `auth/session_token.py` (signed cookie payload), and **`streamlit_session.py`** (restore / persist login across browser refresh — see below).
+- **Email verification** and **password reset** use one-time token links: `?verify=...` and `?reset=...` on your **`DOCUBOT_PUBLIC_URL`**. Set that variable in production to your real HTTPS app URL.
+- **Outgoing email:** optional **SMTP** (see `.env.example`). If SMTP is not set, the app does not send email; **one-time verification and password-reset links appear on the page** so you can complete sign-up and reset flows in the browser.
+- **Staying signed in after refresh:** Streamlit’s **`session_state`** alone does not survive F5. The app adds a **server session id** in the query string (`docubot_sid`, rows in **`user_sessions`** in SQLite), plus a **signed browser cookie**, and a one-run guard in `session_state` so widget reruns do not keep re-applying the URL session. **`DOCUBOT_SESSION_SECRET`** sets the HMAC key for cookies; if unset, a key is derived from `DOCUBOT_DATA_DIR`. **Sign out** clears the DB session, URL param, and cookie (see `streamlit_session.clear_all_session_persistence` and the logout path in `app.py`).
+- **Data isolation:** each user has a **separate Chroma index** at `DOCUBOT_DATA_DIR/users/<user_id>/chroma/`. Retrieval and uploads apply only to the logged-in account.
+
 ## Deployment
 
 ### Docker
 
-Build and run (mount a volume so indexed documents survive restarts):
+Build and run (mount a volume at **`/data`** so the user database and all per-user indexes survive restarts):
 
 ```bash
 docker build -t docubot .
-docker run --rm -p 8501:8501 \
+docker run --name docubot --rm -p 8501:8501 \
   --env-file .env \
-  -v docubot_chroma:/data/chroma \
+  -e DOCUBOT_DATA_DIR=/data \
+  -v docubot_data:/data \
   docubot
 ```
 
-The image binds Streamlit to `0.0.0.0` and uses **`PORT`** if set (common on PaaS), otherwise **`STREAMLIT_SERVER_PORT`**, otherwise **8501**.
+**Why the `-e DOCUBOT_DATA_DIR=/data` line?** A typical local **`.env`** has `DOCUBOT_DATA_DIR=.docubot`. When you use **`--env-file .env`**, that value is injected into the container and **overrides** the image default, so the app would write under `/app/.docubot` **inside the container** — not on the mounted volume. Anything not on the volume is lost when the container is removed. The extra `-e` forces data onto **`/data`**, which is the same path as **`-v docubot_data:/data`**, so your SQLite user DB and Chroma files persist in the `docubot_data` volume.
+
+**Why `docker start` said “no such container”?** You used **`--rm`**: Docker **deletes** the container as soon as it stops, so the old name (`optimistic_ishizaka`) is gone. That is normal. Your data is supposed to live in the **volume**, not in the container; start a **new** container (same `docker run` or `docker compose up`) and with **`DOCUBOT_DATA_DIR=/data`** your user account will still be there.
+
+The image sets **`DOCUBOT_DATA_DIR=/data`** in the Dockerfile, but **host `.env` wins** unless you override as above. Streamlit binds to `0.0.0.0` and uses **`PORT`** if set (common on PaaS), otherwise **`STREAMLIT_SERVER_PORT`**, otherwise **8501`.
 
 ### Checklist for a hosted environment
 
 - Set **secrets** / env vars: `GEMINI_API_KEY`, `OPENAI_API_KEY`, and optionally `TAVILY_API_KEY`.
-- Provide a **persistent disk** or volume for `DOCUBOT_CHROMA_PATH` (or accept re-indexing on each deploy).
-- Ensure outbound HTTPS to Google, OpenAI, and your chosen web-search backend.
+- Set **`DOCUBOT_PUBLIC_URL`** to the public app URL (for links in emails and for in-app copy when SMTP is off). For production, configure **SMTP** (or a provider-compatible relay) so users receive links by email; without SMTP, links are only shown in the UI.
+- Set **`DOCUBOT_SESSION_SECRET`** to a long random value if you use multiple app replicas or need stable cookie validation across restarts.
+- Provide a **persistent disk** or volume for **`DOCUBOT_DATA_DIR`** (or accounts and indexes are lost on redeploy).
+- Ensure outbound HTTPS to Google, OpenAI, your **SMTP** host, and your chosen web-search backend.
 - Size the instance for **Chroma + Streamlit** (small CPU/RAM is usually enough for demos).
 
 ## Architecture (high level)
@@ -97,7 +121,7 @@ The image binds Streamlit to `0.0.0.0` and uses **`PORT`** if set (common on Paa
 4. **Index** → `rag/embedder.py` embeds chunks (**OpenAI**); `rag/store.py` writes to Chroma with metadata (`source`, `page`, `chunk_index`, `doc_id`).
 5. **Retrieve** → `rag/retriever.py` runs **cosine similarity** on embeddings and **BM25** over the same corpus, then **RRF**-style fusion of ranks.
 6. **Agent** → `agent/graph.py`: **Planner** (structured plan), **Retriever** (tools), **Grader**, up to **two** re-plan loops, then **Generator** prep. The UI **streams** the final answer via `services/llm.py` (**Gemini** by default).
-7. **UI** → `app.py`: sidebar upload + document status + delete; chat; **workflow trace**; **Sources** under assistant replies when chunks exist.
+7. **UI** → `app.py`: **auth wall** (tabs: sign-in + create account; password reset and resend-verification in expanders; `?reset=` flow); call **`streamlit_session.try_restore_user_session()`** right after **`st.set_page_config`**; sidebar **upload**, indexed **document list** (per-file delete, **Remove all documents** clears the user index), **chat** with pinned input; **workflow trace**; **Sources** under assistant replies when chunks exist.
 
 ## Training spec deliverables (checklist)
 
@@ -125,7 +149,7 @@ Under `test_data/`:
 
 ## Tests
 
-The training spec expects three test modules (plus shared fixtures in `tests/conftest.py`):
+Automated tests focus on the **ingestion / cleaning / RAG / LangGraph** stack (see table below). **Authentication and Streamlit session persistence** are **not** covered by this repo’s test suite; exercise sign-in, email links, and password reset manually or in your own environment.
 
 | File | Scope |
 |------|--------|
@@ -148,6 +172,7 @@ Cleaner module is targeted for **≥80%** line coverage in `test_cleaner.py`.
 | 3 | Upload `messy_data.csv`, ask about the rows | `test_retriever.test_demo_data_fixtures_present` |
 | 4 | Ask a **vague or multi-part** question → **workflow trace** should show **`replan`** (grader may loop back to the planner) | `test_workflow.test_replan_loop_trace_with_stubbed_nodes` |
 | 5 | Unrelated question vs indexed docs only | `test_workflow.test_generator_prompts_discourage_hallucination_when_context_missing` |
+| 6 | **Auth:** create account, open the on-page verification link, sign in; optional forgot-password / resend; confirm you stay signed in after refresh | *No pytest coverage for `auth/` or `streamlit_session.py`* |
 
 Full **LangGraph + Gemini** in the UI needs valid **`.env`** keys; automated tests avoid live LLM calls except where stubbed.
 
@@ -159,6 +184,6 @@ The stack uses **OpenAI embeddings**. A `local` embedding mode is possible with 
 
 - **Console tracebacks mentioning `torchvision` / `transformers`:** These are **not** DocuBot bugs. Streamlit’s **file watcher** inspects loaded packages; optional `transformers` submodules expect `torchvision`, which this project does not install. The app still runs. The repo sets **`fileWatcherType = "none"`** in `.streamlit/config.toml` to keep the console quiet (you lose automatic reload-on-save for code changes; refresh the browser or switch to `auto` if you prefer reload and can ignore the noise).
 
-- **Gemini** structured outputs are used for Planner / Grader via LangChain’s `with_structured_output`; if a model ID errors, try `gemini-1.5-flash` or check current model names in Google AI Studio.
+- **Gemini** structured outputs are used for Planner / Grader via LangChain’s `with_structured_output`. If a model id errors, pick a current id from [Google AI Studio](https://aistudio.google.com/) and set **`DOCUBOT_CHAT_MODEL`** (avoid outdated ids that return **404** on the current API).
 - **Streaming** uses the active chat provider (**Gemini** or **OpenAI**) for the final generation call in `app.py`.
 - **Re-plan cap**: at most **two** `bump_replan` cycles before the graph proceeds to generation.

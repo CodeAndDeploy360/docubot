@@ -1,37 +1,72 @@
-"""ChromaDB wrapper: add, delete by document id, fetch all for BM25 refresh."""
+"""ChromaDB wrapper: per-user persistent clients, add/delete/list, BM25 revision tracking."""
 
 from __future__ import annotations
 
+import threading
 import uuid
+from pathlib import Path
 from typing import Any
 
 import chromadb
 from chromadb.api.models.Collection import Collection
 
-from config import chroma_path
+from config import data_dir
 
 _COLLECTION_NAME = "docubot_docs"
-_client: chromadb.PersistentClient | None = None
-_index_revision = 0
+_thread = threading.local()
+
+# user_id -> PersistentClient
+_clients: dict[str, chromadb.PersistentClient] = {}
+_index_revision: dict[str, int] = {}
+_lock = threading.Lock()
+
+
+def _user_chroma_dir(user_id: str) -> str:
+    return str(data_dir() / "users" / user_id / "chroma")
+
+
+def set_active_user(user_id: str | None) -> None:
+    """Call on the Streamlit thread before any store op; retriever_node sets it on the graph worker thread."""
+    _thread.user_id = user_id
+
+
+def get_active_user() -> str:
+    uid = getattr(_thread, "user_id", None)
+    if not uid:
+        raise RuntimeError("No active user — set_active_user() before using the vector store.")
+    return uid
+
+
+def reset_for_tests() -> None:
+    """Clear client cache (pytest / isolated runs)."""
+    global _clients, _index_revision
+    with _lock:
+        _clients = {}
+        _index_revision = {}
+    _thread.user_id = None
+    from rag import retriever
+
+    retriever.clear_hybrid_cache_for_tests()
 
 
 def index_revision() -> int:
-    """Bumps when chunks are added or removed; BM25 cache can skip full reload while this is unchanged."""
-
-    return _index_revision
+    uid = get_active_user()
+    return _index_revision.get(uid, 0)
 
 
 def _bump_index_revision() -> None:
-    global _index_revision
-    _index_revision += 1
+    uid = get_active_user()
+    _index_revision[uid] = _index_revision.get(uid, 0) + 1
 
 
 def get_client() -> chromadb.PersistentClient:
-    global _client
-    if _client is None:
-        chroma_path().mkdir(parents=True, exist_ok=True)
-        _client = chromadb.PersistentClient(path=str(chroma_path()))
-    return _client
+    uid = get_active_user()
+    with _lock:
+        if uid not in _clients:
+            p = _user_chroma_dir(uid)
+            Path(p).mkdir(parents=True, exist_ok=True)
+            _clients[uid] = chromadb.PersistentClient(path=p)
+        return _clients[uid]
 
 
 def get_collection() -> Collection:
@@ -59,13 +94,6 @@ def add_document_chunks(
 
 
 def delete_document(doc_id: str) -> int:
-    """
-    Remove every chunk for this doc_id from Chroma.
-
-    Uses ``delete(where=...)`` so all matching rows are removed in one call; the older
-    ``get`` + ``delete(ids=...)`` path could miss rows when ``get`` applied a default
-    limit, leaving vectors behind so RAG still answered from "deleted" documents.
-    """
     col = get_collection()
     doc_id = str(doc_id)
     result = col.delete(where={"doc_id": {"$eq": doc_id}})
@@ -80,16 +108,10 @@ def new_doc_id() -> str:
 
 
 def index_chunk_count() -> int:
-    """Rows in the vector collection (persists on disk; may differ from the Streamlit doc list)."""
     return int(get_collection().count())
 
 
 def list_documents_and_legacy_from_index() -> tuple[list[dict[str, Any]], int]:
-    """
-    One Chroma scan: sidebar doc list + count of chunks missing ``doc_id`` (legacy).
-
-    Call this only on session init (or after index-clear), not on every Streamlit rerun.
-    """
     col = get_collection()
     if col.count() == 0:
         return [], 0
@@ -121,7 +143,6 @@ def list_documents_and_legacy_from_index() -> tuple[list[dict[str, Any]], int]:
 
 
 def clear_index() -> int:
-    """Remove all chunks from storage. Returns how many rows were removed (0 if none)."""
     client = get_client()
     n = 0
     try:

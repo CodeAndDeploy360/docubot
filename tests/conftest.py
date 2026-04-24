@@ -3,10 +3,9 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def fresh_chroma(monkeypatch, tmp_path):
-    """Isolate Chroma state and reset the persistent client between tests."""
+    """Isolate per-user Chroma under tmp_path and fix a test user id."""
     import rag.store as st
 
-    st._client = None
-    root = tmp_path / "chroma_data"
-    root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("DOCUBOT_CHROMA_PATH", str(root))
+    st.reset_for_tests()
+    monkeypatch.setenv("DOCUBOT_DATA_DIR", str(tmp_path))
+    st.set_active_user("00000000-0000-0000-0000-000000000001")

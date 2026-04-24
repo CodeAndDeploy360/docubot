@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import hashlib
 from pathlib import Path
+from typing import Any
 
 
 def _bool(name: str, default: bool = False) -> bool:
@@ -13,8 +15,12 @@ def _bool(name: str, default: bool = False) -> bool:
     return v.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def chroma_path() -> Path:
-    return Path(os.getenv("DOCUBOT_CHROMA_PATH", "./vector_db")).resolve()
+def data_dir() -> Path:
+    """
+    Application data root: user database (users.sqlite3) and per-user Chroma directories
+    (users/<user_id>/chroma). Override with DOCUBOT_DATA_DIR.
+    """
+    return Path(os.getenv("DOCUBOT_DATA_DIR", ".docubot")).resolve()
 
 
 def pii_redaction_enabled() -> bool:
@@ -82,3 +88,35 @@ def max_sources_display() -> int:
 def retriever_top_k() -> int:
     """Chunks to retrieve per question (hybrid fusion). Lower = slightly faster and shorter prompts."""
     return max(1, min(32, int(os.getenv("DOCUBOT_RETRIEVER_K", "8"))))
+
+
+def public_base_url() -> str:
+    """Base URL for email links (verification, password reset). No trailing slash."""
+    return os.getenv("DOCUBOT_PUBLIC_URL", "http://127.0.0.1:8501").rstrip("/")
+
+
+def session_signing_secret() -> bytes:
+    """
+    HMAC key for signed browser session cookies. Set ``DOCUBOT_SESSION_SECRET`` in production
+    (any long random string); if unset, a key is derived from ``DOCUBOT_DATA_DIR`` (ok for local dev
+    on one machine, but cookies invalidate if the data path changes).
+    """
+    raw = (os.getenv("DOCUBOT_SESSION_SECRET") or "").strip()
+    if raw:
+        return hashlib.sha256(raw.encode("utf-8")).digest()
+    return hashlib.sha256(str(data_dir().resolve()).encode("utf-8")).digest()
+
+
+def smtp_config() -> dict[str, Any] | None:
+    """If DOCUBOT_SMTP_HOST is set, return connection settings; otherwise None (dev link-in-UI only)."""
+    host = (os.getenv("DOCUBOT_SMTP_HOST") or "").strip()
+    if not host:
+        return None
+    return {
+        "host": host,
+        "port": int(os.getenv("DOCUBOT_SMTP_PORT", "587")),
+        "user": (os.getenv("DOCUBOT_SMTP_USER") or "").strip() or None,
+        "password": (os.getenv("DOCUBOT_SMTP_PASSWORD") or "") or None,
+        "from_addr": (os.getenv("DOCUBOT_SMTP_FROM") or os.getenv("DOCUBOT_SMTP_USER") or "noreply@localhost").strip(),
+        "use_tls": _bool("DOCUBOT_SMTP_USE_TLS", True),
+    }

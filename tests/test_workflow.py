@@ -75,6 +75,7 @@ def test_replan_loop_trace_with_stubbed_nodes(monkeypatch):
     graph = compile_app_graph()
     out = graph.invoke(
         {
+            "user_id": "00000000-0000-0000-0000-000000000001",
             "user_query": "vague multi-part question",
             "chat_history": [],
             "replan_count": 0,

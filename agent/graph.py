@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from agent import prompts
 from agent.state import AgentState
 from agent.tools import knowledge_base_search, web_search
+from rag import store
 from services.llm import build_chat_model, invoke_with_rate_limit_retry
 
 
@@ -162,6 +163,10 @@ def _normalize_web_payload(raw: str, label_prefix: int) -> list[dict[str, Any]]:
 
 
 def retriever_node(state: AgentState) -> dict[str, Any]:
+    uid = state.get("user_id")
+    if not uid:
+        raise ValueError("user_id is required in workflow state (set by the app for the logged-in user).")
+    store.set_active_user(str(uid))
     plan = state.get("plan") or []
     retrieved: list[dict[str, Any]] = []
     seen_hashes: set[str] = set()
