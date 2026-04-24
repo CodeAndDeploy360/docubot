@@ -2,7 +2,7 @@
 
 DocuBot is a training project: a single-page **Streamlit** app where you upload **PDF, TXT, or CSV** files, index them into **ChromaDB**, and ask questions in a chat UI. Answers are produced by a **LangGraph** workflow (Planner → Retriever → Grader → Generator prompt + streamed LLM) with **hybrid retrieval** (vector + BM25) and **source citations**.
 
-**Project direction:** chat uses **Google Gemini** (free tier / AI Studio); **embeddings** use **OpenAI**; **web search** is a **real** integration (DuckDuckGo by default, optional **Tavily** for production); the repo is **deployment-ready** (Docker + env conventions).
+**Project direction:** chat uses **Google Gemini**; **embeddings** use **OpenAI**; **web search** is a **real** integration (DuckDuckGo by default, optional **Tavily** for production); the repo is **deployment-ready** (Docker + env conventions).
 
 ## Quick start
 
